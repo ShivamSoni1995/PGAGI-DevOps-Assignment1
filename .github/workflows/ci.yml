@@ -6,6 +6,8 @@ on:
     branches: [develop]
   pull_request:
     branches: [develop, main]
+  workflow_call:
+    # Allow CD workflow to call this workflow
 
 env:
   AZURE_CONTAINER_REGISTRY: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
