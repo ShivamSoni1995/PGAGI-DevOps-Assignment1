@@ -28,7 +28,7 @@ resource "azurerm_monitor_action_group" "main" {
   tags                = local.common_tags
 
   dynamic "email_receiver" {
-    for_each = var.alert_email != "" ? [1] : []
+    for_each = var.alert_email != "" ? toset(["enabled"]) : toset([])
     content {
       name                    = "email-alert"
       email_address           = var.alert_email
@@ -37,7 +37,7 @@ resource "azurerm_monitor_action_group" "main" {
   }
 
   dynamic "webhook_receiver" {
-    for_each = var.slack_webhook_url != "" ? [1] : []
+    for_each = var.slack_webhook_url != "" ? toset(["enabled"]) : toset([])
     content {
       name                    = "slack-webhook"
       service_uri             = var.slack_webhook_url
