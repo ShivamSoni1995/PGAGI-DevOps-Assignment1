@@ -58,6 +58,8 @@ jobs:
           tags: |
             ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:${{ steps.vars.outputs.sha_short }}
             ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:latest
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://pgagi-devops-backend.eastus.azurecontainer.io:8000
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -90,7 +92,7 @@ jobs:
               --memory 1.5 \
               --ports 8000 \
               --ip-address Public \
-              --dns-name-label devops-backend-${{ github.run_number }} \
+              --dns-name-label pgagi-devops-backend \
               --environment-variables \
                 ENVIRONMENT=production \
               --restart-policy Always
@@ -125,9 +127,7 @@ jobs:
               --memory 1.5 \
               --ports 3000 \
               --ip-address Public \
-              --dns-name-label devops-frontend-${{ github.run_number }} \
-              --environment-variables \
-                NEXT_PUBLIC_API_URL=${{ steps.backend.outputs.url }} \
+              --dns-name-label pgagi-devops-frontend \
               --restart-policy Always
 
       - name: Get Frontend URL
