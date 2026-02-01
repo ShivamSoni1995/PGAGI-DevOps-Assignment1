@@ -1,0 +1,210 @@
+# CD Pipeline - Runs on merge to main branch
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AZURE_CONTAINER_REGISTRY: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+  REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+
+jobs:
+  # Run all CI checks first
+  ci-checks:
+    name: CI Checks
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # Build and Push Production Images
+  build-production:
+    name: Build Production Images
+    runs-on: ubuntu-latest
+    needs: ci-checks
+    outputs:
+      image_tag: ${{ steps.vars.outputs.sha_short }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.AZURE_CONTAINER_REGISTRY }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+
+      - name: Extract Git SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:${{ steps.vars.outputs.sha_short }}
+            ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:latest
+            ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:production
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:${{ steps.vars.outputs.sha_short }}
+            ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:latest
+            ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:production
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.PRODUCTION_BACKEND_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Deploy to Azure
+  deploy-azure:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    needs: build-production
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ env.AZURE_CREDENTIALS }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Terraform Init
+        working-directory: ./terraform/azure
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=prod.terraform.tfstate"
+
+      - name: Terraform Plan
+        working-directory: ./terraform/azure
+        run: |
+          terraform plan \
+            -var="image_tag=${{ needs.build-production.outputs.image_tag }}" \
+            -var="acr_name=${{ secrets.AZURE_CONTAINER_REGISTRY }}" \
+            -var="resource_group_name=${{ env.AZURE_RESOURCE_GROUP }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./terraform/azure
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get deployment outputs
+        id: tf-outputs
+        working-directory: ./terraform/azure
+        run: |
+          echo "frontend_url=$(terraform output -raw frontend_url)" >> $GITHUB_OUTPUT
+          echo "backend_url=$(terraform output -raw backend_url)" >> $GITHUB_OUTPUT
+
+      - name: Health Check - Backend
+        run: |
+          echo "Waiting for backend deployment..."
+          sleep 30
+          for i in {1..10}; do
+            if curl -sf "${{ steps.tf-outputs.outputs.backend_url }}/health" > /dev/null; then
+              echo "Backend is healthy!"
+              break
+            fi
+            echo "Attempt $i: Backend not ready, waiting..."
+            sleep 10
+          done
+
+      - name: Health Check - Frontend
+        run: |
+          echo "Waiting for frontend deployment..."
+          for i in {1..10}; do
+            if curl -sf "${{ steps.tf-outputs.outputs.frontend_url }}" > /dev/null; then
+              echo "Frontend is healthy!"
+              break
+            fi
+            echo "Attempt $i: Frontend not ready, waiting..."
+            sleep 10
+          done
+
+      - name: Deployment Summary
+        run: |
+          echo "### Deployment Complete 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ steps.tf-outputs.outputs.frontend_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | ${{ steps.tf-outputs.outputs.backend_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Image Tag: \`${{ needs.build-production.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # Notify on completion
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-azure]
+    if: always()
+
+    steps:
+      - name: Send Slack notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "Deployment to Azure ${{ needs.deploy-azure.result == 'success' && 'succeeded ✅' || 'failed ❌' }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Azure Deployment ${{ needs.deploy-azure.result == 'success' && 'Succeeded ✅' || 'Failed ❌' }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n${{ github.ref_name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n${{ github.sha }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Triggered by:*\n${{ github.actor }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

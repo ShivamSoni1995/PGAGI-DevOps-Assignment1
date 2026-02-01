@@ -1,0 +1,33 @@
+# Example Terraform Variables File for Azure Deployment
+# Copy this file to terraform.tfvars and fill in your values
+
+# Project Configuration
+project_name = "devops-assignment"
+environment  = "prod"
+location     = "East US"
+
+# Azure Container Registry
+acr_name = "your-acr-name"  # Must already exist
+
+# Resource Group (optional - will be auto-generated if empty)
+resource_group_name = ""
+
+# Docker Image Tag
+image_tag = "latest"
+
+# Container Resources
+backend_cpu     = 0.5
+backend_memory  = 1
+frontend_cpu    = 0.5
+frontend_memory = 1
+
+# Number of container instances (minimum 2 for HA)
+backend_replicas  = 2
+frontend_replicas = 2
+
+# Alert Configuration
+alert_email       = "your-email@example.com"
+slack_webhook_url = ""  # Optional: Slack webhook for notifications
+
+# CORS Configuration
+allowed_origins = "*"
