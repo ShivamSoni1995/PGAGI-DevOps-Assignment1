@@ -75,6 +75,17 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Delete existing Backend Container
+        uses: azure/cli@v2
+        continue-on-error: true
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az container delete \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --name backend-app \
+              --yes || true
+
       - name: Deploy Backend Container
         uses: azure/cli@v2
         with:
@@ -83,7 +94,7 @@ jobs:
             az container create \
               --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
               --name backend-app \
-              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:latest \
+              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:${{ needs.build-and-push.outputs.image_tag }} \
               --registry-login-server ${{ env.AZURE_CONTAINER_REGISTRY }} \
               --registry-username ${{ env.REGISTRY_USERNAME }} \
               --registry-password ${{ env.REGISTRY_PASSWORD }} \
@@ -110,6 +121,17 @@ jobs:
             echo "url=http://${BACKEND_FQDN}:8000" >> $GITHUB_OUTPUT
             echo "Backend URL: http://${BACKEND_FQDN}:8000"
 
+      - name: Delete existing Frontend Container
+        uses: azure/cli@v2
+        continue-on-error: true
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az container delete \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --name frontend-app \
+              --yes || true
+
       - name: Deploy Frontend Container
         uses: azure/cli@v2
         with:
@@ -118,7 +140,7 @@ jobs:
             az container create \
               --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
               --name frontend-app \
-              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:latest \
+              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:${{ needs.build-and-push.outputs.image_tag }} \
               --registry-login-server ${{ env.AZURE_CONTAINER_REGISTRY }} \
               --registry-username ${{ env.REGISTRY_USERNAME }} \
               --registry-password ${{ env.REGISTRY_PASSWORD }} \
