@@ -50,6 +50,7 @@ export default function Home() {
         <div className="message-box">
           <h2>Backend Message:</h2>
           <p>{message}</p>
+          <p>Thank you for visiting our site!</p>
         </div>
         <div className="info">
           <p>Backend URL: {backendUrl}</p>
