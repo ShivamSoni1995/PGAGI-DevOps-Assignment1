@@ -27,6 +27,11 @@ provider "azurerm" {
       purge_soft_delete_on_destroy = true
     }
   }
+  
+  # Use Service Principal authentication in CI/CD
+  # Credentials are passed via environment variables:
+  # ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_TENANT_ID, ARM_SUBSCRIPTION_ID
+  skip_provider_registration = true
 }
 
 # Random suffix for unique resource names
