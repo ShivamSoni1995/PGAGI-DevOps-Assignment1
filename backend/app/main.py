@@ -15,12 +15,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Configure CORS - Allow all origins for container deployment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

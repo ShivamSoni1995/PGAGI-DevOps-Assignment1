@@ -2,25 +2,31 @@ import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import axios from 'axios';
 
+// Hardcoded fallback for Azure deployment
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://pgagi-devops-backend.eastus.azurecontainer.io:8000';
+
 export default function Home() {
   const [message, setMessage] = useState('Loading...');
   const [status, setStatus] = useState('');
+  const [backendUrl, setBackendUrl] = useState('');
 
   useEffect(() => {
+    setBackendUrl(API_URL);
+    
     const fetchData = async () => {
       try {
         // First check if backend is healthy
-        const healthCheck = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/health`);
+        const healthCheck = await axios.get(`${API_URL}/api/health`);
         
         if (healthCheck.data.status === 'healthy') {
           setStatus('Backend is connected!');
           // Then fetch the message
-          const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/message`);
+          const response = await axios.get(`${API_URL}/api/message`);
           setMessage(response.data.message);
         }
       } catch (error) {
         setMessage('Failed to connect to the backend');
-        setStatus('Backend connection failed');
+        setStatus(`Backend connection failed: ${error.message}`);
         console.error('Error:', error);
       }
     };
@@ -46,7 +52,7 @@ export default function Home() {
           <p>{message}</p>
         </div>
         <div className="info">
-          <p>Backend URL: {process.env.NEXT_PUBLIC_API_URL}</p>
+          <p>Backend URL: {backendUrl}</p>
         </div>
       </main>
 
