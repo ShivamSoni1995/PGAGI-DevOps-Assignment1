@@ -13,8 +13,8 @@ env:
 
 jobs:
   # Build and Push Production Images
-  build-production:
-    name: Build Production Images
+  build-and-push:
+    name: Build and Push Images
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.vars.outputs.sha_short }}
@@ -46,7 +46,6 @@ jobs:
           tags: |
             ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:${{ steps.vars.outputs.sha_short }}
             ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:latest
-            ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:production
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -59,103 +58,125 @@ jobs:
           tags: |
             ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:${{ steps.vars.outputs.sha_short }}
             ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:latest
-            ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:production
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ secrets.PRODUCTION_BACKEND_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Deploy to Azure
-  deploy-azure:
+  # Deploy to Azure Container Instances
+  deploy:
     name: Deploy to Azure
     runs-on: ubuntu-latest
-    needs: build-production
-    environment: production
+    needs: build-and-push
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Deploy Backend Container
+        uses: azure/cli@v2
         with:
-          terraform_version: 1.6.0
+          azcliversion: latest
+          inlineScript: |
+            az container create \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --name backend-app \
+              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/backend:latest \
+              --registry-login-server ${{ env.AZURE_CONTAINER_REGISTRY }} \
+              --registry-username ${{ env.REGISTRY_USERNAME }} \
+              --registry-password ${{ env.REGISTRY_PASSWORD }} \
+              --cpu 1 \
+              --memory 1.5 \
+              --ports 8000 \
+              --ip-address Public \
+              --dns-name-label devops-backend-${{ github.run_number }} \
+              --environment-variables \
+                ENVIRONMENT=production \
+              --restart-policy Always
 
-      - name: Extract Azure credentials
-        id: azure-creds
-        run: |
-          # Parse the AZURE_CREDENTIALS JSON
-          echo "ARM_CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientSecret')" >> $GITHUB_ENV
-          echo "ARM_TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenantId')" >> $GITHUB_ENV
-          echo "ARM_SUBSCRIPTION_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.subscriptionId')" >> $GITHUB_ENV
+      - name: Get Backend URL
+        id: backend
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            BACKEND_FQDN=$(az container show \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --name backend-app \
+              --query ipAddress.fqdn -o tsv)
+            echo "url=http://${BACKEND_FQDN}:8000" >> $GITHUB_OUTPUT
+            echo "Backend URL: http://${BACKEND_FQDN}:8000"
 
-      - name: Terraform Init
-        working-directory: ./terraform/azure
-        run: |
-          terraform init \
-            -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=prod.terraform.tfstate"
+      - name: Deploy Frontend Container
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az container create \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --name frontend-app \
+              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:latest \
+              --registry-login-server ${{ env.AZURE_CONTAINER_REGISTRY }} \
+              --registry-username ${{ env.REGISTRY_USERNAME }} \
+              --registry-password ${{ env.REGISTRY_PASSWORD }} \
+              --cpu 1 \
+              --memory 1.5 \
+              --ports 3000 \
+              --ip-address Public \
+              --dns-name-label devops-frontend-${{ github.run_number }} \
+              --environment-variables \
+                NEXT_PUBLIC_API_URL=${{ steps.backend.outputs.url }} \
+              --restart-policy Always
 
-      - name: Terraform Plan
-        working-directory: ./terraform/azure
-        run: |
-          terraform plan \
-            -var="image_tag=${{ needs.build-production.outputs.image_tag }}" \
-            -var="acr_name=${{ secrets.AZURE_CONTAINER_REGISTRY }}" \
-            -var="resource_group_name=${{ env.AZURE_RESOURCE_GROUP }}" \
-            -out=tfplan
-
-      - name: Terraform Apply
-        working-directory: ./terraform/azure
-        run: terraform apply -auto-approve tfplan
-
-      - name: Get deployment outputs
-        id: tf-outputs
-        working-directory: ./terraform/azure
-        run: |
-          echo "frontend_url=$(terraform output -raw frontend_url)" >> $GITHUB_OUTPUT
-          echo "backend_url=$(terraform output -raw backend_url)" >> $GITHUB_OUTPUT
+      - name: Get Frontend URL
+        id: frontend
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            FRONTEND_FQDN=$(az container show \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --name frontend-app \
+              --query ipAddress.fqdn -o tsv)
+            echo "url=http://${FRONTEND_FQDN}:3000" >> $GITHUB_OUTPUT
+            echo "Frontend URL: http://${FRONTEND_FQDN}:3000"
 
       - name: Health Check - Backend
         run: |
           echo "Waiting for backend deployment..."
           sleep 30
           for i in {1..10}; do
-            if curl -sf "${{ steps.tf-outputs.outputs.backend_url }}/health" > /dev/null; then
-              echo "Backend is healthy!"
-              break
+            if curl -sf "${{ steps.backend.outputs.url }}/health" > /dev/null 2>&1; then
+              echo "✅ Backend is healthy!"
+              exit 0
             fi
             echo "Attempt $i: Backend not ready, waiting..."
             sleep 10
           done
+          echo "⚠️ Backend health check timed out (may still be starting)"
 
       - name: Health Check - Frontend
         run: |
           echo "Waiting for frontend deployment..."
           for i in {1..10}; do
-            if curl -sf "${{ steps.tf-outputs.outputs.frontend_url }}" > /dev/null; then
-              echo "Frontend is healthy!"
-              break
+            if curl -sf "${{ steps.frontend.outputs.url }}" > /dev/null 2>&1; then
+              echo "✅ Frontend is healthy!"
+              exit 0
             fi
             echo "Attempt $i: Frontend not ready, waiting..."
             sleep 10
           done
+          echo "⚠️ Frontend health check timed out (may still be starting)"
 
       - name: Deployment Summary
         run: |
-          echo "### Deployment Complete 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | ${{ steps.tf-outputs.outputs.frontend_url }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend | ${{ steps.tf-outputs.outputs.backend_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ steps.frontend.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | ${{ steps.backend.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Image Tag: \`${{ needs.build-production.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** \`${{ needs.build-and-push.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
