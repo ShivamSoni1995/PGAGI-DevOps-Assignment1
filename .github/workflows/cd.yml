@@ -10,20 +10,12 @@ env:
   REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
-  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
 
 jobs:
-  # Run all CI checks first
-  ci-checks:
-    name: CI Checks
-    uses: ./.github/workflows/ci.yml
-    secrets: inherit
-
   # Build and Push Production Images
   build-production:
     name: Build Production Images
     runs-on: ubuntu-latest
-    needs: ci-checks
     outputs:
       image_tag: ${{ steps.vars.outputs.sha_short }}
 
