@@ -1,6 +1,6 @@
 project_name       = "pgagi-devops"
 environment        = "prod"
-aws_region         = "ap-south-1"
+aws_region         = "us-east-1"
 vpc_cidr           = "10.0.0.0/16"
 enable_nat_gateway = true
 
