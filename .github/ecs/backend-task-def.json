@@ -1,0 +1,30 @@
+{
+  "family": "pgagi-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::342206309108:role/pgagi-devops-prod-eolh7b-ecs-exec-role",
+  "taskRoleArn": "arn:aws:iam::342206309108:role/pgagi-devops-prod-eolh7b-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "REPLACE_IMAGE",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pgagi-backend",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "backend"
+        }
+      }
+    }
+  ]
+}

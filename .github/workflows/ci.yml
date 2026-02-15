@@ -13,6 +13,9 @@ env:
   AZURE_CONTAINER_REGISTRY: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
   REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPO_BACKEND: ${{ secrets.ECR_REPO_BACKEND }}
+  ECR_REPO_FRONTEND: ${{ secrets.ECR_REPO_FRONTEND }}
 
 jobs:
   # Backend Tests
@@ -127,6 +130,19 @@ jobs:
         id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Configure AWS credentials
+        if: env.AWS_REGION != '' && env.ECR_REPO_BACKEND != '' && env.ECR_REPO_FRONTEND != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: env.AWS_REGION != '' && env.ECR_REPO_BACKEND != '' && env.ECR_REPO_FRONTEND != ''
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Build and push Backend image
         uses: docker/build-push-action@v5
         with:
@@ -139,6 +155,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build and push Backend image (ECR)
+        if: env.AWS_REGION != '' && env.ECR_REPO_BACKEND != '' && steps.login-ecr.outputs.registry != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_BACKEND }}:${{ steps.vars.outputs.sha_short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_BACKEND }}:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Build and push Frontend image
         uses: docker/build-push-action@v5
         with:
@@ -148,6 +177,21 @@ jobs:
           tags: |
             ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:${{ steps.vars.outputs.sha_short }}
             ${{ env.AZURE_CONTAINER_REGISTRY }}/frontend:develop
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.BACKEND_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Frontend image (ECR)
+        if: env.AWS_REGION != '' && env.ECR_REPO_FRONTEND != '' && steps.login-ecr.outputs.registry != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_FRONTEND }}:${{ steps.vars.outputs.sha_short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_FRONTEND }}:develop
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.BACKEND_URL }}
           cache-from: type=gha

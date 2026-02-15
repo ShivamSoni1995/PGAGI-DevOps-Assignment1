@@ -1,0 +1,27 @@
+project_name       = "pgagi-devops"
+environment        = "prod"
+aws_region         = "ap-south-1"
+vpc_cidr           = "10.0.0.0/16"
+enable_nat_gateway = true
+
+# Container ports
+backend_container_port  = 8000
+frontend_container_port = 3000
+
+# Fargate sizing
+backend_task_cpu     = "512"
+backend_task_memory  = "1024"
+frontend_task_cpu    = "512"
+frontend_task_memory = "1024"
+
+# Initial desired counts
+backend_desired_count  = 2
+frontend_desired_count = 2
+
+# Secrets Manager (name suffixes)
+secrets = ["backend", "frontend"]
+
+# Optional tags
+additional_tags = {
+  Owner = "devops"
+}
