@@ -37,7 +37,7 @@ export default function Home() {
   return (
     <div className="container">
       <Head>
-        <title>DevOps Assignment-Final</title>
+        <title>DevOps Assignment-Final(1)</title>
         <meta name="description" content="DevOps Assignment with FastAPI and Next.js" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
